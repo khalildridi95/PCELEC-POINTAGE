@@ -1,0 +1,61 @@
+datasource db {
+  provider = "sqlite" // change en "postgresql" + url si besoin
+  url      = env("DATABASE_URL")
+}
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            Int      @id @default(autoincrement())
+  login         String   @unique
+  passwordHash  String
+  role          String   // "admin" | "salarie"
+  matricule     String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  pointages     Pointage[]
+}
+
+model Camping {
+  id       Int      @id @default(autoincrement())
+  nom      String
+  actif    Boolean  @default(true)
+  affaires Affaire[]
+}
+
+model Affaire {
+  id         Int      @id @default(autoincrement())
+  nom        String
+  actif      Boolean  @default(true)
+  camping    Camping  @relation(fields: [campingId], references: [id])
+  campingId  Int
+  pointageLignes PointageLigne[]
+}
+
+model Pointage {
+  id            Int      @id @default(autoincrement())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        Int
+  typePersonne  String   // "salarie" | "interimaire"
+  createdAt     DateTime @default(now())
+  lignes        PointageLigne[]
+}
+
+model PointageLigne {
+  id           Int      @id @default(autoincrement())
+  pointage     Pointage @relation(fields: [pointageId], references: [id])
+  pointageId   Int
+  typeLigne    String   // "chantier" | "deplacement" | "interimaire"
+  camping      Camping? @relation(fields: [campingId], references: [id])
+  campingId    Int?
+  affaire      Affaire? @relation(fields: [affaireId], references: [id])
+  affaireId    Int?
+  tache        String?
+  heureDebut   String?
+  heurePause   String?
+  heureReprise String?
+  heureFin     String?
+  commentaire  String?
+  dtype        String?  // pour déplacement: "domicile"/"travail"
+}
