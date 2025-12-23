@@ -1,0 +1,490 @@
+// Code.gs — Version complète avec historique limité aux 20 dernières entrées
+// Modifié pour : écrire D en MAJUSCULES ("TRAVAIL","DEPL DOMICILE","DEPL TRAVAIL")
+// + fonction getLogoUrlDirect() pour retourner l'URL directe du logo
+// + getHistoriquePointages() limité pour éviter les timeouts côté web
+// + fonction testPing() pour déboguer
+
+const SS_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+const FEUILLE_DONNEES = "Donnees";
+const FEUILLE_POINTAGES = "Pointages";
+const RECAP_OUT_SHEET = "RECAP_CAMPING";
+const SRC_SHEET_ALIASES = [FEUILLE_POINTAGES, "Pointages", "Pointage"];
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile("Index")
+    .setTitle("Pointage")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function ping() { return 'pong'; }
+
+function testPing() {
+  Logger.log('testPing appelé');
+  return 'pong';
+}
+
+// ---------------- Helpers: parsing & formatting ----------------
+function parseTimeToMinutes(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  if (typeof value === "number" && !isNaN(value)) {
+    if (value <= 24) return Math.round(value * 60);
+    return Math.round(value);
+  }
+  if (value instanceof Date) return value.getHours() * 60 + value.getMinutes();
+  const s = String(value).trim();
+  let m = s.match(/^(\d{1,2})\s*:\s*(\d{1,2})$/);
+  if (m) {
+    const h = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+    if (!isNaN(h) && !isNaN(mm)) return h * 60 + mm;
+  }
+  m = s.match(/^(\d{1,2})[.,](\d+)$/);
+  if (m) {
+    const h = parseInt(m[1], 10);
+    const dec = parseFloat("0." + m[2]);
+    if (!isNaN(h) && !isNaN(dec)) return Math.round((h + dec) * 60);
+  }
+  const n = parseFloat(s.replace(',', '.'));
+  if (!isNaN(n)) {
+    if (n <= 24) return Math.round(n * 60);
+    return Math.round(n);
+  }
+  return null;
+}
+function parseHMToMinutes(hm) { return parseTimeToMinutes(hm); }
+
+function minutesToHHMM(totalMinutes) {
+  if (totalMinutes == null || isNaN(totalMinutes)) return "00:00";
+  const mins = Math.max(0, Math.round(totalMinutes));
+  const hours = Math.floor(mins / 60);
+  const minutes = mins % 60;
+  return String(hours) + ":" + (minutes < 10 ? "0" + minutes : String(minutes));
+}
+
+// ---------------- Auth / Lists ----------------
+function checkLogin(login, password) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sh = ss.getSheetByName(FEUILLE_DONNEES);
+    if (!sh) return false;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return false;
+    const data = sh.getRange(2, 1, lastRow - 1, 2).getDisplayValues(); // A:B
+    for (let i = 0; i < data.length; i++) {
+      const id = String(data[i][0] || '').trim();
+      const pw = String(data[i][1] || '').trim();
+      if (id === login && pw === password) return true;
+    }
+    return false;
+  } catch (err) {
+    Logger.log('checkLogin erreur: %s', err.toString());
+    return false;
+  }
+}
+
+function getIdentifiants() {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sh = ss.getSheetByName(FEUILLE_DONNEES);
+    if (!sh) return [];
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return [];
+    const raw = sh.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
+    const cleaned = raw.map(r => String(r[0] || '').trim()).filter(v => v);
+    return Array.from(new Set(cleaned)).sort((a,b) => a.localeCompare(b, 'fr', {sensitivity:'base'}));
+  } catch (err) {
+    Logger.log('getIdentifiants erreur: %s', err.toString());
+    return [];
+  }
+}
+
+function getCampingsEtAffaires() {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sh = ss.getSheetByName(FEUILLE_DONNEES);
+    if (!sh) return [];
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return [];
+    const data = sh.getRange(2, 3, lastRow - 1, 2).getDisplayValues(); // C:D
+    return data
+      .filter(r => String(r[0] || '').trim())
+      .map(r => ({ camping: String(r[0] || '').trim(), affaire: String(r[1] || '').trim() }));
+  } catch (err) {
+    Logger.log('getCampingsEtAffaires erreur: %s', err.toString());
+    return [];
+  }
+}
+
+function getMatricules() {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sh = ss.getSheetByName(FEUILLE_DONNEES);
+    if (!sh) return [];
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return [];
+    const raw = sh.getRange(2, 5, lastRow - 1, 1).getDisplayValues(); // col E
+    const cleaned = raw.map(r => String(r[0] || '').trim()).filter(v => v);
+    return Array.from(new Set(cleaned)).sort((a,b) => a.localeCompare(b, 'fr', {sensitivity:'base'}));
+  } catch (err) {
+    Logger.log('getMatricules erreur: %s', err.toString());
+    return [];
+  }
+}
+
+function findMatriculeForEmployee(name) {
+  if (!name) return '';
+  const ss = SpreadsheetApp.openById(SS_ID);
+  const sh = ss.getSheetByName(FEUILLE_DONNEES);
+  if (!sh) return '';
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return '';
+  const data = sh.getRange(2, 1, lastRow - 1, 5).getDisplayValues(); // A:E
+  const target = String(name).trim().toLowerCase();
+  for (let i = 0; i < data.length; i++) {
+    const nom = (data[i][0] || '').toString().trim().toLowerCase();
+    const matricule = (data[i][4] || '').toString().trim();
+    if (nom === target) return matricule;
+  }
+  return '';
+}
+function getMatriculeForName(name) {
+  try {
+    return findMatriculeForEmployee(name);
+  } catch (e) {
+    Logger.log('getMatriculeForName error: ' + e.toString());
+    return '';
+  }
+}
+
+// ---------------- Duration util (midnight & pauses) ----------------
+function computeDurationMinutes(debutStr, finStr, pauseStr, repriseStr) {
+  const toMin = parseTimeToMinutes;
+  let debut = toMin(debutStr);
+  let fin = toMin(finStr);
+  if (debut == null || fin == null) return 0;
+  if (fin <= debut) fin += 24 * 60;
+  let dur = fin - debut;
+  if (pauseStr !== undefined && repriseStr !== undefined && pauseStr !== '' && repriseStr !== '') {
+    let pause = toMin(pauseStr), reprise = toMin(repriseStr);
+    if (pause != null && reprise != null) {
+      if (reprise <= pause) reprise += 24 * 60;
+      if (reprise > pause) dur -= Math.max(0, reprise - pause);
+    }
+  }
+  return Math.max(0, dur);
+}
+
+// ---------------- Enregistrement (ordered entries) ----------------
+function enregistrerPointageV2(payload) {
+  if (!payload) throw new Error("Payload vide.");
+  const ss = SpreadsheetApp.openById(SS_ID);
+  const sh = ss.getSheetByName(FEUILLE_POINTAGES);
+  if (!sh) throw new Error("Feuille Pointages introuvable.");
+
+  const tz = ss.getSpreadsheetTimeZone();
+  const now = new Date();
+  const dateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dateStr = Utilities.formatDate(dateOnly, tz, "dd/MM/yyyy");
+
+  const name = payload.nom || '';
+  const matricule = findMatriculeForEmployee(name) || '';
+
+  const rows = [];
+  const numericOps = []; // {timeDays, travelDays}
+
+  function pushRow(rowArray, timeDays, travelDays) {
+    rows.push(rowArray);
+    numericOps.push({ timeDays: timeDays, travelDays: travelDays });
+  }
+
+  if (Array.isArray(payload.entries)) {
+    for (let i = 0; i < payload.entries.length; i++) {
+      const e = payload.entries[i] || {};
+      if (e.type === 'chantier') {
+        const minutes = computeDurationMinutes(e.heureDebut, e.heureFin, e.heurePause, e.heureReprise);
+        const totalStr = minutesToHHMM(minutes);
+        const row = [
+          dateStr,
+          payload.typePersonne || '',
+          name,
+          'TRAVAIL',
+          e.camping || '',
+          e.affaire || '',
+          e.commentaire || '',
+          e.heureDebut || '',
+          e.heurePause || '',
+          e.heureReprise || '',
+          e.heureFin || '',
+          totalStr,
+          '',
+          matricule || ''
+        ];
+        pushRow(row, minutes / 1440, null);
+      } else if (e.type === 'deplacement') {
+        const minutes = computeDurationMinutes(e.heureDebut, e.heureFin, null, null);
+        const totalStr = minutesToHHMM(minutes);
+        if (e.dtype === 'travail') {
+          const row = [
+            dateStr, payload.typePersonne || '', name, 'DEPL TRAVAIL',
+            '', '', e.commentaire || '',
+            e.heureDebut || '', '', '', e.heureFin || '',
+            totalStr, '', matricule || ''
+          ];
+          pushRow(row, minutes / 1440, null);
+        } else {
+          const row = [
+            dateStr, payload.typePersonne || '', name, 'DEPL DOMICILE',
+            '', '', e.commentaire || '',
+            e.heureDebut || '', '', '', e.heureFin || '',
+            '', totalStr, matricule || ''
+          ];
+          pushRow(row, null, minutes / 1440);
+        }
+      }
+    }
+  }
+
+  if (rows.length === 0) return 0;
+
+  const startRow = sh.getLastRow() + 1;
+  sh.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+
+  for (let j = 0; j < numericOps.length; j++) {
+    const rIndex = startRow + j;
+    const op = numericOps[j];
+    try {
+      if (op.timeDays != null) sh.getRange(rIndex, 12).setValue(op.timeDays).setNumberFormat('[h]:mm');
+      if (op.travelDays != null) sh.getRange(rIndex, 13).setValue(op.travelDays).setNumberFormat('[h]:mm');
+    } catch (e) {
+      try {
+        if (op.timeDays != null) sh.getRange(rIndex, 12).setValue(minutesToHHMM(op.timeDays * 1440));
+        if (op.travelDays != null) sh.getRange(rIndex, 13).setValue(minutesToHHMM(op.travelDays * 1440));
+      } catch (e2) {}
+    }
+  }
+
+  try {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(5000);
+    try {
+      if (typeof generateRecapCampingKeepFormatting === 'function') generateRecapCampingKeepFormatting();
+      else if (typeof generateRecapCamping === 'function') generateRecapCamping();
+    } finally {
+      try { lock.releaseLock(); } catch (e) {}
+    }
+  } catch (err) {
+    Logger.log('Erreur génération RECAP après enregistrementV2: ' + String(err));
+  }
+
+  return rows.length;
+}
+
+// ---------------- Logo direct URL ----------------
+function getLogoUrlDirect() {
+  return "https://www.pcelec.fr/wp-content/uploads/2020/01/pc-elec-sans-ombre.png";
+}
+
+// ---------------- RECAP generation (keep formatting) ----------------
+function _findPointagesSheet() {
+  const ss = SpreadsheetApp.openById(SS_ID);
+  for (let i = 0; i < SRC_SHEET_ALIASES.length; i++) {
+    const s = ss.getSheetByName(SRC_SHEET_ALIASES[i]);
+    if (s) return s;
+  }
+  return null;
+}
+function _parseDateDisplay(v) {
+  if (v === null || v === undefined || String(v).trim() === '') return null;
+  if (v instanceof Date) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    const d = parseInt(m[1], 10), mo = parseInt(m[2], 10) - 1, y = parseInt(m[3], 10);
+    const dd = new Date(y, mo, d);
+    if (!isNaN(dd.getTime())) return new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
+  }
+  const maybe = new Date(s);
+  if (!isNaN(maybe.getTime())) return new Date(maybe.getFullYear(), maybe.getMonth(), maybe.getDate());
+  return null;
+}
+
+function generateRecapCampingKeepFormatting() {
+  const ss = SpreadsheetApp.openById(SS_ID);
+  const src = _findPointagesSheet();
+  if (!src) {
+    let outSh = ss.getSheetByName(RECAP_OUT_SHEET);
+    if (!outSh) outSh = ss.insertSheet(RECAP_OUT_SHEET);
+    outSh.clear();
+    outSh.getRange(1, 1).setValue('Feuille source Pointages introuvable. Vérifie le nom.');
+    return RECAP_OUT_SHEET;
+  }
+
+  const data = src.getDataRange().getDisplayValues();
+  if (!data || data.length <= 1) {
+    let outSh = ss.getSheetByName(RECAP_OUT_SHEET);
+    if (!outSh) outSh = ss.insertSheet(RECAP_OUT_SHEET);
+    outSh.clearContents();
+    outSh.getRange(1, 1).setValue('Aucune donnée dans ' + src.getName());
+    return RECAP_OUT_SHEET;
+  }
+
+  const IDX_DATE = 0, IDX_CAMPING = 4, IDX_AFFAIRE = 5, IDX_WORK = 11;
+  const agg = {};
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowDate = _parseDateDisplay(row[IDX_DATE]);
+    if (!rowDate) continue;
+    const camping = (row[IDX_CAMPING] || '').toString().trim() || '(sans camping)';
+    const affaire = (row[IDX_AFFAIRE] || '').toString().trim() || '(sans affaire)';
+    const workMin = parseTimeToMinutes(row[IDX_WORK]) || 0;
+    if (!agg[camping]) agg[camping] = { affaires: {}, totalMin: 0 };
+    if (!agg[camping].affaires[affaire]) agg[camping].affaires[affaire] = 0;
+    agg[camping].affaires[affaire] += workMin;
+    agg[camping].totalMin += workMin;
+  }
+
+  const campings = Object.keys(agg).sort((a, b) => a.localeCompare(b, 'fr', {sensitivity:'base'}));
+  const out = [];
+  for (let ci = 0; ci < campings.length; ci++) {
+    const camp = campings[ci];
+    out.push([camp]);
+    out.push(['AFFAIRE', 'HEURES TRAVAIL (HH:MM)', 'Total minutes']);
+    const affaires = Object.keys(agg[camp].affaires).sort((a, b) => a.localeCompare(b, 'fr', {sensitivity:'base'}));
+    for (let ai = 0; ai < affaires.length; ai++) {
+      const aff = affaires[ai];
+      const minutes = agg[camp].affaires[aff];
+      out.push([aff, minutes / 1440, minutes]);
+    }
+    out.push(['TOTAL', agg[camp].totalMin / 1440, agg[camp].totalMin]);
+    out.push([]);
+  }
+
+  const maxCols = out.reduce((m, r) => Math.max(m, (r ? r.length : 0) || 0), 1);
+  const padded = out.map(r => {
+    const row = Array.isArray(r) ? r.slice() : [];
+    while (row.length < maxCols) row.push('');
+    return row;
+  });
+
+  let outSh = ss.getSheetByName(RECAP_OUT_SHEET);
+  if (!outSh) outSh = ss.insertSheet(RECAP_OUT_SHEET);
+
+  const writeRows = padded.length, writeCols = maxCols;
+  if (outSh.getMaxRows() < writeRows) outSh.insertRowsAfter(outSh.getMaxRows(), writeRows - outSh.getMaxRows());
+  if (outSh.getMaxColumns() < writeCols) outSh.insertColumnsAfter(outSh.getMaxColumns(), writeCols - outSh.getMaxColumns());
+
+  const targetRange = outSh.getRange(1, 1, writeRows, writeCols);
+  const merged = targetRange.getMergedRanges();
+  if (!merged || merged.length === 0) {
+    targetRange.setValues(padded);
+  } else {
+    for (let r = 0; r < writeRows; r++) {
+      for (let c = 0; c < writeCols; c++) {
+        outSh.getRange(r + 1, c + 1).setValue(padded[r][c]);
+      }
+    }
+  }
+
+  const sheetMaxRows = outSh.getMaxRows(), sheetMaxCols = outSh.getMaxColumns();
+  if (sheetMaxRows > writeRows) {
+    try { outSh.getRange(writeRows + 1, 1, sheetMaxRows - writeRows, writeCols).clearContent(); } catch (e) { Logger.log(e.toString()); }
+  }
+  if (sheetMaxCols > writeCols) {
+    try { outSh.getRange(1, writeCols + 1, writeRows, sheetMaxCols - writeCols).clearContent(); } catch (e) { Logger.log(e.toString()); }
+  }
+
+  SpreadsheetApp.flush();
+  return RECAP_OUT_SHEET;
+}
+
+// ---------------- Historique / Export ----------------
+function getHistoriquePointages() {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sh = ss.getSheetByName(FEUILLE_POINTAGES);
+    if (!sh) return [];
+    return sh.getDataRange().getDisplayValues();
+  } catch (err) {
+    Logger.log('getHistoriquePointages erreur: %s', err.toString());
+    return [];
+  }
+}
+
+function exportHistoriquePDF() {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sh = ss.getSheetByName(FEUILLE_POINTAGES);
+    if (!sh) return "";
+
+    const data = sh.getDataRange().getDisplayValues();
+    if (!data || data.length === 0) return "";
+
+    const tmpTitle = 'tmp_historique_pointages_' + new Date().getTime();
+    const tmpSs = SpreadsheetApp.create(tmpTitle);
+    const tmpId = tmpSs.getId();
+    const tmpSh = tmpSs.getActiveSheet();
+    tmpSh.clear();
+    tmpSh.getRange(1, 1, data.length, data[0].length).setValues(data);
+    tmpSh.getRange(1, 1, 1, data[0].length).setFontWeight('bold');
+    tmpSh.getRange(1, 1, data.length, data[0].length).setWrap(true);
+
+    try {
+      for (let c = 1; c <= data[0].length; c++) {
+        const w = sh.getColumnWidth(c);
+        tmpSh.setColumnWidth(c, Math.max(40, w));
+      }
+    } catch (e) {}
+
+    SpreadsheetApp.flush();
+
+    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+    const pdfName = 'historique_pointages_' + timestamp + '.pdf';
+    const exportUrlBase = 'https://docs.google.com/spreadsheets/d/' + tmpId + '/export?';
+    const exportParams = [
+      'format=pdf',
+      'portrait=false',
+      'size=A4',
+      'fitw=true',
+      'top_margin=0.5',
+      'bottom_margin=0.5',
+      'left_margin=0.5',
+      'right_margin=0.5',
+      'sheetnames=false',
+      'printtitle=false',
+      'pagenumbers=false',
+      'gridlines=false',
+      'fzr=true'
+    ].join('&');
+    const url = exportUrlBase + exportParams;
+
+    const token = ScriptApp.getOAuthToken();
+    const response = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+
+    const blob = response.getBlob().setName(pdfName);
+    const pdfFile = DriveApp.createFile(blob);
+    try { pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+    try { DriveApp.getFileById(tmpId).setTrashed(true); } catch (e) {}
+    return pdfFile.getUrl();
+  } catch (err) {
+    Logger.log('exportHistoriquePDF erreur: %s', err.toString());
+    return "";
+  }
+}
+
+// ---------------- Cache for footer text ----------------
+function getAppCreditCached() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const key = 'app_credit_v1';
+    let val = cache.get(key);
+    if (val) return val;
+    val = "PCELEC";
+    cache.put(key, val, 6 * 60 * 60);
+    return val;
+  } catch (e) {
+    Logger.log('getAppCreditCached erreur: %s', e.toString());
+    return "PCELEC";
+  }
+}
