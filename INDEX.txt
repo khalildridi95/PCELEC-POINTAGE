@@ -1,1 +1,454 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pointage PCELEC</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f5f5f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .footer {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 20px;
+      padding: 20px;
+      border-top: 1px solid #ddd;
+    }
+    .btn {
+      padding: 10px 20px;
+      background-color: #0066cc;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+    .btn:hover {
+      background-color: #0052a3;
+    }
+    .btn-secondary {
+      background-color: #6c757d;
+    }
+    .btn-secondary:hover {
+      background-color: #545b62;
+    }
+    .btn-success {
+      background-color: #28a745;
+    }
+    .btn-success:hover {
+      background-color: #218838;
+    }
+    .panel {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+      z-index: 1000;
+      overflow-y: auto;
+    }
+    .panel.active {
+      display: block;
+    }
+    .panel-content {
+      background: white;
+      margin: 50px auto;
+      padding: 0;
+      width: 95%;
+      max-width: 1400px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .panel-header {
+      background-color: #0066cc;
+      color: white;
+      padding: 15px 20px;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .panel-header h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+    .panel-header .btn-group {
+      display: flex;
+      gap: 10px;
+    }
+    .panel-body {
+      padding: 20px;
+    }
+    .filters {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      margin-bottom: 20px;
+      padding: 15px;
+      background-color: #f8f9fa;
+      border-radius: 4px;
+    }
+    .filters label {
+      font-weight: bold;
+      margin-right: 5px;
+    }
+    .filters input {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .status-text {
+      margin-bottom: 15px;
+      padding: 10px;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .status-text.info {
+      background-color: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+    .status-text.error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .status-text.success {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .table-container {
+      overflow-x: auto;
+      max-height: 600px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead {
+      background-color: #f8f9fa;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    th {
+      padding: 12px 8px;
+      text-align: left;
+      border-bottom: 2px solid #dee2e6;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+    td {
+      padding: 10px 8px;
+      border-bottom: 1px solid #dee2e6;
+    }
+    tbody tr:hover {
+      background-color: #f5f5f5;
+    }
+    tbody tr:nth-child(even) {
+      background-color: #fafafa;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Pointage PCELEC</h1>
+    <div class="main-content">
+      <p>Application de pointage pour PCELEC</p>
+    </div>
+    
+    <div class="footer">
+      <button class="btn" onclick="afficherMesPointagesValides()">Mes pointages validés</button>
+    </div>
+  </div>
 
+  <!-- Panel: Mes pointages validés -->
+  <div id="myValidatedPanel" class="panel">
+    <div class="panel-content">
+      <div class="panel-header">
+        <h2>Mes pointages validés</h2>
+        <div class="btn-group">
+          <button class="btn btn-success" onclick="exporterMesPointagesValidesPDF()">Exporter PDF</button>
+          <button class="btn btn-secondary" onclick="fermerMesPointagesValides()">Fermer</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="filters">
+          <label for="myValDateFrom">Date du:</label>
+          <input type="date" id="myValDateFrom">
+          <label for="myValDateTo">au:</label>
+          <input type="date" id="myValDateTo">
+          <button class="btn" onclick="chargerMesPointagesValides()">Charger</button>
+        </div>
+        
+        <div id="myValidatedStatus" class="status-text info" style="display:none;"></div>
+        
+        <div class="table-container">
+          <table id="tblMyValidated">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Travail</th>
+                <th>Déplacement</th>
+                <th>HSup</th>
+                <th>HNuit</th>
+                <th>Panier midi</th>
+                <th>Panier soir</th>
+                <th>Zone</th>
+                <th>FT</th>
+                <th>Découchés</th>
+                <th>WE</th>
+                <th>Validé le</th>
+                <th>Validé par</th>
+                <th>Commentaire</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Helper: Convert minutes to HH:MM format
+    function minutesToHHMM_local(totalMinutes) {
+      if (totalMinutes == null || isNaN(totalMinutes)) return "00:00";
+      const mins = Math.max(0, Math.round(totalMinutes));
+      const hours = Math.floor(mins / 60);
+      const minutes = mins % 60;
+      return String(hours).padStart(2, '0') + ":" + String(minutes).padStart(2, '0');
+    }
+
+    // Helper: Set default dates (last 30 days)
+    function setDefaultMyValidatedDates() {
+      const today = new Date();
+      const thirtyDaysAgo = new Date(today);
+      thirtyDaysAgo.setDate(today.getDate() - 30);
+      
+      const formatDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      
+      document.getElementById('myValDateFrom').value = formatDate(thirtyDaysAgo);
+      document.getElementById('myValDateTo').value = formatDate(today);
+    }
+
+    // Show the "Mes pointages validés" panel
+    function afficherMesPointagesValides() {
+      const panel = document.getElementById('myValidatedPanel');
+      panel.classList.add('active');
+      chargerMesPointagesValides();
+    }
+
+    // Close the "Mes pointages validés" panel
+    function fermerMesPointagesValides() {
+      const panel = document.getElementById('myValidatedPanel');
+      panel.classList.remove('active');
+    }
+
+    // Load validated pointages data
+    function chargerMesPointagesValides() {
+      const statusEl = document.getElementById('myValidatedStatus');
+      const dateFrom = document.getElementById('myValDateFrom').value;
+      const dateTo = document.getElementById('myValDateTo').value;
+      
+      statusEl.style.display = 'block';
+      statusEl.className = 'status-text info';
+      statusEl.textContent = 'Chargement des pointages validés...';
+      
+      if (!dateFrom || !dateTo) {
+        statusEl.className = 'status-text error';
+        statusEl.textContent = 'Veuillez sélectionner les dates de début et de fin.';
+        return;
+      }
+      
+      // Simulate API call - In real implementation, this would call a backend service
+      // Example: google.script.run.withSuccessHandler(renderMesPointagesValides).getValidatedPointages(dateFrom, dateTo);
+      
+      setTimeout(() => {
+        // Mock data for demonstration
+        const mockData = [
+          {
+            date: '15/12/2024',
+            travail: '08:00',
+            deplacement: '01:00',
+            hsup: '00:30',
+            hnuit: '00:00',
+            panierMidi: 'Oui',
+            panierSoir: 'Non',
+            zone: 'Zone A',
+            ft: 'FT001',
+            decouches: 'Non',
+            we: 'Non',
+            valideLE: '16/12/2024',
+            validePar: 'Manager1',
+            commentaire: 'Chantier camping'
+          },
+          {
+            date: '16/12/2024',
+            travail: '07:30',
+            deplacement: '00:45',
+            hsup: '00:00',
+            hnuit: '00:00',
+            panierMidi: 'Oui',
+            panierSoir: 'Oui',
+            zone: 'Zone B',
+            ft: 'FT002',
+            decouches: 'Oui',
+            we: 'Non',
+            valideLE: '17/12/2024',
+            validePar: 'Manager2',
+            commentaire: 'Intervention urgente'
+          }
+        ];
+        
+        renderMesPointagesValides(mockData);
+        statusEl.className = 'status-text success';
+        statusEl.textContent = `${mockData.length} pointage(s) validé(s) trouvé(s).`;
+      }, 500);
+    }
+
+    // Render validated pointages in the table
+    function renderMesPointagesValides(data) {
+      const tbody = document.querySelector('#tblMyValidated tbody');
+      tbody.innerHTML = '';
+      
+      if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px;">Aucun pointage validé trouvé pour cette période.</td></tr>';
+        return;
+      }
+      
+      data.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${row.date || ''}</td>
+          <td>${row.travail || '00:00'}</td>
+          <td>${row.deplacement || '00:00'}</td>
+          <td>${row.hsup || '00:00'}</td>
+          <td>${row.hnuit || '00:00'}</td>
+          <td>${row.panierMidi || 'Non'}</td>
+          <td>${row.panierSoir || 'Non'}</td>
+          <td>${row.zone || ''}</td>
+          <td>${row.ft || ''}</td>
+          <td>${row.decouches || 'Non'}</td>
+          <td>${row.we || 'Non'}</td>
+          <td>${row.valideLE || ''}</td>
+          <td>${row.validePar || ''}</td>
+          <td>${row.commentaire || ''}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Export validated pointages to PDF
+    function exporterMesPointagesValidesPDF() {
+      const statusEl = document.getElementById('myValidatedStatus');
+      statusEl.style.display = 'block';
+      statusEl.className = 'status-text info';
+      statusEl.textContent = 'Génération du PDF en cours...';
+      
+      const dateFrom = document.getElementById('myValDateFrom').value;
+      const dateTo = document.getElementById('myValDateTo').value;
+      
+      // Simulate PDF export - In real implementation, this would call a backend service
+      // Example: google.script.run.withSuccessHandler(handlePDFSuccess).exportValidatedPointagesPDF(dateFrom, dateTo);
+      
+      setTimeout(() => {
+        // Mock PDF generation
+        const mockPdfBase64 = 'JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFsgMyAwIFIgXQovQ291bnQgMQo+PgplbmRvYmoKMyAwIG9iago8PAovVHlwZSAvUGFnZQovUGFyZW50IDIgMCBSCi9NZWRpYUJveCBbIDAgMCA2MTIgNzkyIF0KL0NvbnRlbnRzIDQgMCBSCi9SZXNvdXJjZXMgPDwKL0ZvbnQgPDwKL0YxIDUgMCBSCj4+Cj4+Cj4+CmVuZG9iago0IDAgb2JqCjw8Ci9MZW5ndGggNDQKPj4Kc3RyZWFtCkJUCi9GMSAxMiBUZgoxMDAgNzAwIFRkCihNZXMgcG9pbnRhZ2VzIHZhbGlkw6lzKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCj4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYNCjAwMDAwMDAwMDkgMDAwMDAgbg0KMDAwMDAwMDA1OCAwMDAwMCBuDQowMDAwMDAwMTE1IDAwMDAwIG4NCjAwMDAwMDAyNTIgMDAwMDAgbg0KMDAwMDAwMDM0NCAwMDAwMCBuDQp0cmFpbGVyCjw8Ci9TaXplIDYKL1Jvb3QgMSAwIFIKPj4Kc3RhcnR4cmVmCjQ0MQolJUVPRgo=';
+        const fileName = `mes_pointages_valides_${dateFrom}_${dateTo}.pdf`;
+        
+        downloadBase64(mockPdfBase64, fileName, 'application/pdf');
+        
+        statusEl.className = 'status-text success';
+        statusEl.textContent = 'PDF généré avec succès !';
+        
+        setTimeout(() => {
+          statusEl.style.display = 'none';
+        }, 3000);
+      }, 1000);
+    }
+
+    // Helper: Download base64 encoded file
+    function downloadBase64(base64Data, fileName, mimeType) {
+      try {
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+        
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } catch (error) {
+        console.error('Error downloading file:', error);
+        alert('Erreur lors du téléchargement du fichier.');
+      }
+    }
+
+    // Expose functions to window object
+    window.afficherMesPointagesValides = afficherMesPointagesValides;
+    window.fermerMesPointagesValides = fermerMesPointagesValides;
+    window.chargerMesPointagesValides = chargerMesPointagesValides;
+    window.exporterMesPointagesValidesPDF = exporterMesPointagesValidesPDF;
+
+    // Initialize on page load
+    window.onload = function() {
+      setDefaultMyValidatedDates();
+      console.log('Pointage PCELEC initialized');
+    };
+
+    // Close panel when clicking outside
+    document.getElementById('myValidatedPanel').addEventListener('click', function(e) {
+      if (e.target === this) {
+        fermerMesPointagesValides();
+      }
+    });
+  </script>
+</body>
+</html>
